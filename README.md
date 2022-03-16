@@ -8,19 +8,19 @@ This is a simple test ROM for Nintendo 64 that can detect all known (and a few t
 
 * EEPROM 4Kbit (512 bytes)
 * EEPROM 16Kbit (2048 bytes)
-* FlashRAM 1Mbit (131100 bytes)
-* SRAM 256Kbit (32770 bytes)
-* SRAM 768Kbit Banked (98300 bytes)
+* FlashRAM 1Mbit (128 KiB)
+* SRAM 256Kbit (32 KiB)
+* SRAM 768Kbit Banked (96 KiB)
   * Only implemented in one official release: Dezaemon 3D
-  * Supported on EverDrive64 using `SRAM 96K` save type
-* SRAM 1Mbit Banked (131100 bytes)
+  * Supported on EverDrive64 using `SRAM 768K`/`SRAM 96K` save type
+* SRAM 1Mbit Banked (128 KiB)
   * Theoretically-possible: no known implementation exists
-* SRAM 768Kbit Contiguous (98300 bytes)
+* SRAM 768Kbit Contiguous (96 KiB)
   * Not implemented by any official release
-  * Only supported on EverDrive64 X5/X7 using `SRAM 1M` save type
-* SRAM 1Mbit Contiguous (131100 bytes)
+  * Only supported on EverDrive64 X5/X7 using `SRAM 1M`/`SRAM 128K` save type
+* SRAM 1Mbit Contiguous (128 KiB)
   * Not implemented by any official release
-  * Only supported on EverDrive64 X5/X7 using `SRAM 1M` save type
+  * Only supported on EverDrive64 X5/X7 using `SRAM 1M`/`SRAM 128K` save type
 
 ## Multiple save types
 

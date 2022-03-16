@@ -11,21 +11,25 @@ This is a simple test ROM for Nintendo 64 that can detect all known (and a few t
 * FlashRAM 1Mbit (128 KiB)
 * SRAM 256Kbit (32 KiB)
 * SRAM 768Kbit Banked (96 KiB)
-  * Only implemented in one official release: Dezaemon 3D
+  * Only used by one officially-licensed cartridge: Dezaemon 3D
   * Supported on EverDrive64 using `SRAM 768K`/`SRAM 96K` save type
 * SRAM 1Mbit Banked (128 KiB)
-  * Theoretically-possible: no known implementation exists
+  * Not used by any officially-licensed cartridge
+  * Theoretically-possible: no known emulator/flashcart implementation exists
 * SRAM 768Kbit Contiguous (96 KiB)
-  * Not implemented by any official release
-  * Only supported on EverDrive64 X5/X7 using `SRAM 1M`/`SRAM 128K` save type
+  * Not used by any officially-licensed cartridge
+  * Only supported on EverDrive64 V3/X5/X7 using `SRAM 1M`/`SRAM 128K` save type
 * SRAM 1Mbit Contiguous (128 KiB)
-  * Not implemented by any official release
-  * Only supported on EverDrive64 X5/X7 using `SRAM 1M`/`SRAM 128K` save type
+  * Not used by any officially-licensed cartridge
+  * Only supported on EverDrive64 V3/X5/X7 using `SRAM 1M`/`SRAM 128K` save type
 
 ## Multiple save types
 
-* **More than one save type may be detected.** For instance, EEPROM 16Kbit implies that EEPROM 4Kbit save capability is also supported.
-* It is theoretically possible for a cartridge to contain EEPROM alongside SRAM or FlashRAM. No emulators or flash carts currently support this configuration.
+* If a larger capacity is supported, any compatible smaller capacities will also be detected:
+  * EEPROM 16Kbit implies that EEPROM 4Kbit is also supported.
+  * SRAM 1Mbit Banked implies that both SRAM 768Kbit Banked and SRAM 256Kbit are supported.
+  * SRAM 1Mbit Contiguous implies that both SRAM 768Kbit Contiguous and SRAM 256Kbit are supported.
+* It is technically possible for a cartridge to contain EEPROM alongside SRAM or FlashRAM. No emulators or flash carts currently support this configuration.
 * It is not possible for SRAM to co-exist with FlashRAM. This is because both SRAM and FlashRAM are accessed through Cartridge Domain 2 Address 2 memory space.
 
 ## Run the test ROM

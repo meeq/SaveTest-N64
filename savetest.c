@@ -78,6 +78,8 @@ const char * format_flashram_detected(flashram_type_t flashram)
     }
 }
 
+unsigned int gLastSramLocation = 0xFFFFFFFF;
+
 void cart_dom2_addr2_read(void * dest, uint32_t offset, uint32_t len)
 {
     assert(dest != NULL);
@@ -140,6 +142,7 @@ bool cart_detect_flashram(flashram_type_t * chip_id)
     }
     else
     {
+        printf("FlashRam check failed: silicon_id %X`%X\n", (unsigned int)silicon_id[0], (unsigned int)silicon_id[1]);
         if (chip_id != NULL) *chip_id = FLASHRAM_TYPE_NONE;
         return false;
     }
@@ -249,10 +252,57 @@ bool cart_sram_contiguous_verify(size_t capacity)
     cart_dom2_addr2_read( read_buf, 0, capacity );
 
     /* Compare what was written to what was read back from SRAM */
-    return memcmp( write_buf, read_buf, capacity ) == 0;
+    if ( memcmp( write_buf, read_buf, capacity ) != 0 )
+    {
+        unsigned int offset = 0;
+        uint32_t * read_words = (uint32_t *)read_buf;
+        while ( *write_words == *read_words )
+        {
+            offset += 1;
+            write_words ++;
+            read_words ++;
+        }
+
+        gLastSramLocation = offset;
+        return false;
+    }
+
+    for( int i = 0; i < capacity / sizeof(uint32_t); ++i )
+    {
+        write_words[i] = (capacity / sizeof(uint32_t)) - i;
+    }
+
+    // Attempt to prevent [0] from always having 0 written.
+    write_words[0] = 0xAAAAAAAA;
+
+    /* Write the test values into SRAM */
+    data_cache_hit_writeback_invalidate( write_buf, capacity );
+    cart_dom2_addr2_write( write_buf, 0, capacity );
+
+    /* Read the test values back to see if they persisted */
+    data_cache_hit_writeback_invalidate( read_buf, capacity );
+    cart_dom2_addr2_read( read_buf, 0, capacity );
+
+    /* Compare what was written to what was read back from SRAM */
+    if ( memcmp( write_buf, read_buf, capacity ) != 0 )
+    {
+        unsigned int offset = 0;
+        uint32_t * read_words = (uint32_t *)read_buf;
+        while ( *write_words == *read_words )
+        {
+            offset += 1;
+            write_words ++;
+            read_words ++;
+        }
+
+        gLastSramLocation = offset;
+        return false;
+    }
+
+    return true;
 }
 
-save_type_t cart_detect_save_type( flashram_type_t * flashram )
+save_type_t cart_detect_save_type( flashram_type_t * flashram, bool doflashcheck, bool printerrors )
 {
     save_type_t detected = SAVE_TYPE_NONE;
 
@@ -266,7 +316,7 @@ save_type_t cart_detect_save_type( flashram_type_t * flashram )
         }
     }
 
-    if( cart_detect_flashram( flashram ) )
+    if( (doflashcheck != false) && cart_detect_flashram( flashram ) )
     {
         detected |= SAVE_TYPE_FLASHRAM_1MBIT;
     }
@@ -293,11 +343,56 @@ save_type_t cart_detect_save_type( flashram_type_t * flashram )
                 {
                     detected |= SAVE_TYPE_SRAM_1MBIT_CONTIGUOUS;
                 }
+
+            } else if ( printerrors != false )
+            {
+                printf( "SRAM Readback failed difference at: %u\n", gLastSramLocation);
             }
         }
     }
 
     return detected;
+}
+
+#define BYTE uint8_t
+void SetDom2Speed(BYTE LAT, BYTE PWD, BYTE PGS, BYTE RLS)
+{
+    // Set fast SRAM access.
+    // SDK default, 0x80371240
+    //                  DCBBAA
+    // AA = LAT
+    // BB = PWD
+    //  C = PGS
+    //  D = RLS
+    //
+    // 1 cycle = 1/62.5 MHz = 16ns
+    // Time = (register+1)*16ns
+    // LAT = tL = 0x40 = 65 cycles
+    // PWM = tP = 0x12 = 19 cycles
+    // PGS      = 0x07 = 512 bytes page size
+    // RLS = tR = 0x03 = 4 cycles
+    #define PI_BASE_REG          0x04600000
+    #define PI_STATUS_REG        (PI_BASE_REG+0x10)
+    #define	PI_STATUS_ERROR      0x04
+    #define PI_STATUS_IO_BUSY    0x02
+    #define PI_STATUS_DMA_BUSY   0x01
+    #define PI_BSD_DOM1_LAT_REG  (PI_BASE_REG+0x14)
+    #define PI_BSD_DOM1_PWD_REG  (PI_BASE_REG+0x18)
+    #define PI_BSD_DOM1_PGS_REG  (PI_BASE_REG+0x1C)
+    #define PI_BSD_DOM1_RLS_REG  (PI_BASE_REG+0x20)
+    #define PI_BSD_DOM2_LAT_REG  (PI_BASE_REG+0x24)
+    #define PI_BSD_DOM2_PWD_REG  (PI_BASE_REG+0x28)
+    #define PI_BSD_DOM2_PGS_REG  (PI_BASE_REG+0x2C)
+    #define PI_BSD_DOM2_RLS_REG  (PI_BASE_REG+0x30)
+    #define KSEG0 0x80000000
+    #define KSEG1 0xA0000000
+    #define	PHYS_TO_K1(x)       ((uint32_t)(x)|KSEG1)
+    #define	IO_WRITE(addr,data) (*(volatile uint32_t *)PHYS_TO_K1(addr)=(uint32_t)(data))
+    #define	IO_READ(addr)       (*(volatile uint32_t *)PHYS_TO_K1(addr))
+    IO_WRITE(PI_BSD_DOM2_LAT_REG, LAT); //0x40);
+    IO_WRITE(PI_BSD_DOM2_PWD_REG, PWD); //0x0C);
+    IO_WRITE(PI_BSD_DOM2_PGS_REG, PGS); //0x07);
+    IO_WRITE(PI_BSD_DOM2_RLS_REG, RLS); //0x03);
 }
 
 int main(void)
@@ -315,7 +410,8 @@ int main(void)
     printf( "LibDragon Save Type Detection Test ROM\n" );
 
     flashram_type_t flashram = FLASHRAM_TYPE_NONE;
-    save_type_t detected = cart_detect_save_type( &flashram );
+    SetDom2Speed(0x40, 0x12, 0x07, 0x03);
+    save_type_t detected = cart_detect_save_type( &flashram, true, true );
     printf( "\n" );
 
     printf( "Cartridge Save Type       | Detected\n" );
@@ -334,7 +430,57 @@ int main(void)
         printf( "\n" );
         printf( "No cartridge save capabilities detected.\n" );
         printf( "Check your emulator/flashcart settings!\n" );
-    }
+    } else if ((detected & SAVE_TYPE_SRAM_256KBIT) != 0)
+    {
+        save_type_t detectedOriginal = detected;
 
+        // Do the speedtest.
+        printf( "Executing SRAM DOM2 speedtest (PWD): " );
+        int speed = 0x12;
+        int release = 0x03;
+        printf( "starting at speed 0x%02X\n", speed);
+        while (speed >= 0)
+        {
+            SetDom2Speed(0x40, (speed & 0xFF), 0x07, (release & 0xFF));
+            detected = cart_detect_save_type( &flashram, false, false );
+            if (detected != detectedOriginal)
+            {
+                printf( "\nMax PWD speed: 0x%02X\n", (speed + 1) );
+                break;
+            }
+            printf(".");
+            console_render();
+            speed -= 1;
+        }
+
+        if (speed == -1)
+        {
+            printf( "\nMax PWD speed: 0x%02X\n", 0 );
+        }
+
+        speed = 0x40;
+        printf( "Executing SRAM DOM2 speedtest (LAT): " );
+        printf( "starting at speed 0x%02X\n", speed);
+        while (speed >= 0)
+        {
+            SetDom2Speed((speed & 0xFF), 0xC, 0x07, (release & 0xFF));
+            detected = cart_detect_save_type( &flashram, false, false );
+            if (detected != detectedOriginal)
+            {
+                printf( "\nMax LAT speed: 0x%02X\n", (speed + 1) );
+                break;
+            }
+            printf(".");
+            console_render();
+            speed -= 1;
+        }
+
+        if (speed == -1)
+        {
+            printf( "\nMax LAT speed: 0x%02X\n", 0 );
+        }
+
+        printf( "Speedtest complete\n" );
+    }
     console_render();
 }

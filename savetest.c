@@ -79,6 +79,8 @@ const char * format_flashram_detected(flashram_type_t flashram)
 }
 
 unsigned int gLastSramLocation = 0xFFFFFFFF;
+unsigned int gExpected = 0xFFFFFFFF;
+unsigned int gReadBack = 0xFFFFFFFF;
 
 void cart_dom2_addr2_read(void * dest, uint32_t offset, uint32_t len)
 {
@@ -206,6 +208,18 @@ bool cart_sram_bank_verify(size_t bank)
     /* Compare what was written to what was read back from SRAM */
     if( memcmp( write_buf, read_buf, SRAM_BANK_SIZE ) != 0 )
     {
+        unsigned int offset = 0;
+        uint32_t * read_words = (uint32_t *)read_buf;
+        while ( *write_words == *read_words )
+        {
+            offset += 4;
+            write_words ++;
+            read_words ++;
+        }
+
+        gLastSramLocation = (bank * SRAM_BANK_SIZE) + offset;
+        gExpected = *write_words;
+        gReadBack = *read_words;
         /* There was a mismatch between what was written and read */
         return false;
     }
@@ -221,6 +235,18 @@ bool cart_sram_bank_verify(size_t bank)
         cart_sram_bank_read( read_buf, i, 0, SRAM_BANK_SIZE );
         if( memcmp( write_buf, read_buf, SRAM_BANK_SIZE ) != 0 )
         {
+            unsigned int offset = 0;
+            uint32_t * read_words = (uint32_t *)read_buf;
+            while ( *write_words == *read_words )
+            {
+                offset += 4;
+                write_words ++;
+                read_words ++;
+            }
+
+            gLastSramLocation = (bank * SRAM_BANK_SIZE) + offset;
+            gExpected = *write_words;
+            gReadBack = *read_words;
             /* The write test appears to have wrapped into another bank */
             return false;
         }
@@ -243,6 +269,8 @@ bool cart_sram_contiguous_verify(size_t capacity)
         write_words[i] = i;
     }
   
+    write_words[0] = 0xDCBAABCD;
+
     /* Write the test values into SRAM */
     data_cache_hit_writeback_invalidate( write_buf, capacity );
     cart_dom2_addr2_write( write_buf, 0, capacity );
@@ -258,12 +286,14 @@ bool cart_sram_contiguous_verify(size_t capacity)
         uint32_t * read_words = (uint32_t *)read_buf;
         while ( *write_words == *read_words )
         {
-            offset += 1;
+            offset += 4;
             write_words ++;
             read_words ++;
         }
 
         gLastSramLocation = offset;
+        gExpected = *write_words;
+        gReadBack = *read_words;
         return false;
     }
 
@@ -273,7 +303,7 @@ bool cart_sram_contiguous_verify(size_t capacity)
     }
 
     // Attempt to prevent [0] from always having 0 written.
-    write_words[0] = 0xAAAAAAAA;
+    write_words[0] = 0xABCDDCBA;
 
     /* Write the test values into SRAM */
     data_cache_hit_writeback_invalidate( write_buf, capacity );
@@ -290,12 +320,14 @@ bool cart_sram_contiguous_verify(size_t capacity)
         uint32_t * read_words = (uint32_t *)read_buf;
         while ( *write_words == *read_words )
         {
-            offset += 1;
+            offset += 4;
             write_words ++;
             read_words ++;
         }
 
         gLastSramLocation = offset;
+        gExpected = *write_words;
+        gReadBack = *read_words;
         return false;
     }
 
@@ -411,6 +443,7 @@ int main(void)
 
     flashram_type_t flashram = FLASHRAM_TYPE_NONE;
     SetDom2Speed(0x40, 0x12, 0x07, 0x03);
+    //SetDom2Speed(0x5, 0xC, 0x0d, 0x2);
     save_type_t detected = cart_detect_save_type( &flashram, true, true );
     printf( "\n" );
 
@@ -434,6 +467,17 @@ int main(void)
     {
         save_type_t detectedOriginal = detected;
 
+        // Attempt detect at SDK speed.
+        printf( "Attempting detect at SDK lat=0x05 pwd=0x0c pgs=0xd rls=0x2\n" );
+        SetDom2Speed(0x5, 0xC, 0x0d, 0x2);
+        detected = cart_detect_save_type( &flashram, false, false );
+        if (detected != detectedOriginal)
+        {
+            printf( "Failed - LastMismatch: o:0x%08X w:0x%08X r:0x%08X\n", gLastSramLocation, gExpected, gReadBack );
+        } else {
+            printf( "Success\n" );
+        }
+
         // Do the speedtest.
         printf( "Executing SRAM DOM2 speedtest (PWD): " );
         int speed = 0x12;
@@ -445,19 +489,19 @@ int main(void)
             detected = cart_detect_save_type( &flashram, false, false );
             if (detected != detectedOriginal)
             {
-                printf( "\nMax PWD speed: 0x%02X\n", (speed + 1) );
+                printf( "\nMax PWD speed: 0x%02X\nLastMismatch: o:0x%08X w:0x%08X r:0x%08X\n", (speed + 1), gLastSramLocation, gExpected, gReadBack );
                 break;
             }
             printf(".");
             console_render();
             speed -= 1;
         }
-
+        
         if (speed == -1)
         {
             printf( "\nMax PWD speed: 0x%02X\n", 0 );
         }
-
+        
         speed = 0x40;
         printf( "Executing SRAM DOM2 speedtest (LAT): " );
         printf( "starting at speed 0x%02X\n", speed);
@@ -467,20 +511,23 @@ int main(void)
             detected = cart_detect_save_type( &flashram, false, false );
             if (detected != detectedOriginal)
             {
-                printf( "\nMax LAT speed: 0x%02X\n", (speed + 1) );
+                printf( "\nMax LAT speed: 0x%02X\nLastMismatch: o:0x%08X w:0x%08X r:0x%08X\n", (speed + 1), gLastSramLocation, gExpected, gReadBack );
                 break;
             }
             printf(".");
             console_render();
             speed -= 1;
         }
-
+        
         if (speed == -1)
         {
             printf( "\nMax LAT speed: 0x%02X\n", 0 );
         }
-
+        
         printf( "Speedtest complete\n" );
+        SetDom2Speed(0x5, 0xC, 0x0d, 0x2);
+        detected = cart_detect_save_type( &flashram, false, false );
+
     }
     console_render();
 }
